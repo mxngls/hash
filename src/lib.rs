@@ -18,8 +18,7 @@ where
     V: Clone,
 {
     const DEFAULT_SIZE: usize = 256;
-    const RESIZE_THRESHOLD_NUM: usize = 4;
-    const RESIZE_THRESHOLD_DEM: usize = 5;
+    const RESIZE_THRESHOLD: f64 = 0.8;
     const RESIZE_FACTOR: usize = 2;
 
     pub fn new(hasher: H) -> Self {
@@ -36,7 +35,7 @@ where
     }
 
     fn find_slot(&mut self, key: &K) -> usize {
-        let hash = (self.hasher)(&key);
+        let hash = (self.hasher)(key);
         let mut index = (hash as usize) % self.buffer.len();
 
         while let Some(elem) = &self.buffer[index] {
@@ -49,9 +48,9 @@ where
     }
 
     fn resize(&mut self) {
-        let org_buffer = std::mem::replace(&mut self.buffer, Vec::new());
+        let org_buffer = std::mem::take(&mut self.buffer);
 
-        self.capacity = self.capacity * Self::RESIZE_FACTOR;
+        self.capacity *= Self::RESIZE_FACTOR;
         self.buffer = (0..self.capacity).map(|_| None).collect();
         self.len = 0;
 
@@ -66,10 +65,8 @@ where
         }
     }
 
-    // TODO: fix resize bug
     pub fn insert(&mut self, key: K, value: V) {
-        if self.len >= self.buffer.len() * (Self::RESIZE_THRESHOLD_NUM / Self::RESIZE_THRESHOLD_DEM)
-        {
+        if self.len >= (self.capacity as f64 * Self::RESIZE_THRESHOLD) as usize {
             self.resize();
         }
 
@@ -81,7 +78,7 @@ where
         let slot = self.find_slot(&elem.key);
 
         if self.buffer[slot].is_none() {
-            self.len = self.len + 1;
+            self.len += 1;
         }
 
         self.buffer[slot] = Some(elem);
@@ -169,12 +166,10 @@ mod test {
         let mut map = HashMap::with_capacity(size, hasher);
 
         for i in 0..size {
-            println!("{}", i);
             map.insert(i, "number");
         }
 
         for i in 0..size {
-            println!("{}", i);
             assert_eq!(Some("number"), map.get(i));
         }
 
