@@ -15,14 +15,15 @@ impl<K, V, H> HashMap<K, V, H>
 where
     H: Fn(&K) -> u32,
     K: PartialEq,
+    V: Clone,
 {
-    const INITIAL_SIZE: usize = 256;
+    const DEFAULT_SIZE: usize = 256;
     const RESIZE_THRESHOLD_NUM: usize = 4;
     const RESIZE_THRESHOLD_DEM: usize = 5;
     const RESIZE_FACTOR: usize = 2;
 
     pub fn new(hasher: H) -> Self {
-        Self::with_capacity(Self::INITIAL_SIZE, hasher)
+        Self::with_capacity(Self::DEFAULT_SIZE, hasher)
     }
 
     pub fn with_capacity(capacity: usize, hasher: H) -> Self {
@@ -65,6 +66,7 @@ where
         }
     }
 
+    // TODO: fix resize bug
     pub fn insert(&mut self, key: K, value: V) {
         if self.len >= self.buffer.len() * (Self::RESIZE_THRESHOLD_NUM / Self::RESIZE_THRESHOLD_DEM)
         {
@@ -85,11 +87,11 @@ where
         self.buffer[slot] = Some(elem);
     }
 
-    pub fn get(&mut self, key: K) -> Option<&V> {
+    pub fn get(&mut self, key: K) -> Option<V> {
         let slot = self.find_slot(&key);
 
         match &self.buffer[slot] {
-            Some(elem) if !elem.removed => Some(&elem.value),
+            Some(elem) if !elem.removed => Some(elem.value.clone()),
             _ => None,
         }
     }
@@ -104,5 +106,79 @@ where
             elem.removed = true;
             self.len -= 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn hasher<T: Hash>(key: &T) -> u32 {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        hasher.finish() as u32
+    }
+
+    #[test]
+    fn test_default_creation() {
+        let map: HashMap<String, String, fn(&String) -> u32> = HashMap::new(hasher);
+
+        assert_eq!(map.capacity, 256);
+    }
+
+    #[test]
+    fn test_with_capacity_creation() {
+        let map: HashMap<String, String, fn(&String) -> u32> = HashMap::with_capacity(100, hasher);
+
+        assert_eq!(map.capacity, 100);
+    }
+
+    #[test]
+    fn test_insert() {
+        let mut map = HashMap::new(hasher);
+
+        map.insert("Hello,", "World");
+    }
+
+    #[test]
+    fn test_get() {
+        let mut map = HashMap::new(hasher);
+
+        map.insert("Hello,", "World");
+        assert_eq!("World", map.get("Hello,").unwrap());
+
+        assert_eq!(None, map.get("Hi,"));
+    }
+
+    #[test]
+    fn test_remove() {
+        let mut map = HashMap::new(hasher);
+
+        map.insert("Hello,", "World");
+        map.remove("Hello,");
+
+        assert_eq!(None, map.get("Hello,"))
+    }
+
+    #[test]
+    fn test_resize() {
+        let size = 10;
+        let mut map = HashMap::with_capacity(size, hasher);
+
+        for i in 0..size {
+            println!("{}", i);
+            map.insert(i, "number");
+        }
+
+        for i in 0..size {
+            println!("{}", i);
+            assert_eq!(Some("number"), map.get(i));
+        }
+
+        assert_eq!(size, map.len);
+        assert_eq!(size * 2, map.capacity);
     }
 }
