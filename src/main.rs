@@ -17,5 +17,12 @@ fn main() {
 
     let value = map.get("us").expect("Expected value to be present");
 
-    println!("Hello, {}!\n", value);
+    println!("Hello, {}!", value);
+
+    map.remove("me");
+
+    match map.get("me") {
+        Some(value) => println!("Hello back, {}", value),
+        None => println!("Removed above dumbass..."),
+    };
 }
