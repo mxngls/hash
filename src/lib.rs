@@ -36,13 +36,13 @@ where
 
     fn find_slot(&mut self, key: &K) -> usize {
         let hash = (self.hasher)(key);
-        let mut index = (hash as usize) % self.buffer.len();
+        let mut index = (hash as usize) % self.capacity;
 
         while let Some(elem) = &self.buffer[index] {
             if elem.key == *key && !elem.removed {
                 return index;
             }
-            index = (index + 1) % self.buffer.len();
+            index = (index + 1) % self.capacity;
         }
         index
     }
