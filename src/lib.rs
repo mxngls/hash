@@ -1,7 +1,10 @@
+use std::mem;
+
 struct Elem<K, V> {
     key: K,
     value: V,
     removed: bool,
+    psl: u8,
 }
 
 pub struct HashMap<K, V, H> {
@@ -14,7 +17,7 @@ pub struct HashMap<K, V, H> {
 impl<K, V, H> HashMap<K, V, H>
 where
     H: Fn(&K) -> u32,
-    K: PartialEq,
+    K: PartialEq + Clone,
     V: Clone,
 {
     const DEFAULT_SIZE: usize = 256;
@@ -34,17 +37,26 @@ where
         }
     }
 
+    /// Returns index for insertion/lookup. May point to:
+    ///     1. Empty slot - key absent
+    ///     2. Matching key - key found
+    ///     3. Wrong key - PSL exceeded, key absent
+    /// Callers must verify key equality for case 3.
     fn find_elem(&mut self, key: &K) -> usize {
         let hash = (self.hasher)(key);
+        let mut psl = 0;
         let mut index = (hash as usize) % self.capacity;
 
         loop {
             match &mut self.buffer[index] {
                 None => return index,
-                Some(elem) if elem.key == *key => {
+                Some(elem) if psl > elem.psl || elem.key == *key => {
                     return index;
                 }
-                _ => index = (index + 1) % self.capacity,
+                _ => {
+                    index = (index + 1) % self.capacity;
+                    psl += 1;
+                }
             }
         }
     }
@@ -72,29 +84,49 @@ where
             self.resize();
         }
 
-        let elem = Elem {
+        let hash = (self.hasher)(&key);
+        let mut new = Elem {
             key,
             value,
             removed: false,
+            psl: 0,
         };
 
-        let index = self.find_elem(&elem.key);
+        let mut index = (hash as usize) % self.capacity;
 
-        if match &self.buffer[index] {
-            None => true,
-            Some(elem) => elem.removed,
-        } {
-            self.len += 1;
+        while let Some(existing) = &mut self.buffer[index] {
+            // replace removed
+            if existing.removed {
+                *existing = new;
+                self.len += 1;
+                return;
+            }
+
+            // overwrite existing
+            if existing.key == new.key {
+                existing.value = new.value;
+                return;
+            }
+
+            // swap
+            if new.psl > existing.psl {
+                mem::swap(&mut new, existing);
+            }
+
+            index = (index + 1) % self.capacity;
+            new.psl += 1;
         }
 
-        self.buffer[index] = Some(elem);
+        // insert new
+        self.buffer[index] = Some(new);
+        self.len += 1;
     }
 
     pub fn get(&mut self, key: K) -> Option<V> {
         let index = self.find_elem(&key);
 
         match &self.buffer[index] {
-            Some(elem) if !elem.removed => Some(elem.value.clone()),
+            Some(elem) if !elem.removed && elem.key == key => Some(elem.value.clone()),
             _ => None,
         }
     }
@@ -103,7 +135,7 @@ where
         let index = self.find_elem(&key);
 
         match &mut self.buffer[index] {
-            Some(elem) if !elem.removed => {
+            Some(elem) if !elem.removed || elem.key == key => {
                 elem.removed = true;
                 self.len -= 1;
             }
@@ -141,14 +173,14 @@ mod test {
 
     #[test]
     fn test_insert() {
-        let mut map = HashMap::new(hasher);
+        let mut map = HashMap::with_capacity(16, hasher);
 
         map.insert("Hello,", "World");
     }
 
     #[test]
     fn test_insert_overwrite() {
-        let mut map = HashMap::new(hasher);
+        let mut map = HashMap::with_capacity(16, hasher);
 
         map.insert("Hello,", "World");
         map.insert("Hello,", "Me");
@@ -165,7 +197,7 @@ mod test {
 
     #[test]
     fn test_insert_overwrite_removed() {
-        let mut map = HashMap::new(hasher);
+        let mut map = HashMap::with_capacity(16, hasher);
 
         map.insert("Hello,", "World");
         map.remove("Hello,");
@@ -183,7 +215,7 @@ mod test {
 
     #[test]
     fn test_get() {
-        let mut map = HashMap::new(hasher);
+        let mut map = HashMap::with_capacity(16, hasher);
 
         map.insert("Hello,", "World");
 
@@ -193,7 +225,7 @@ mod test {
 
     #[test]
     fn test_remove() {
-        let mut map = HashMap::new(hasher);
+        let mut map = HashMap::with_capacity(16, hasher);
 
         map.insert("Hello,", "World");
         map.remove("Hello,");
@@ -220,7 +252,9 @@ mod test {
             assert_eq!(Some("number"), map.get(i));
         }
 
-        assert_eq!(size, map.len);
+        assert_eq!(size * 2, map.buffer.len());
         assert_eq!(size * 2, map.capacity);
+        assert_eq!(size, map.len);
+        assert_eq!(map.capacity, map.buffer.len(),);
     }
 }
