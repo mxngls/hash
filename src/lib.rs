@@ -34,17 +34,19 @@ where
         }
     }
 
-    fn find_slot(&mut self, key: &K) -> usize {
+    fn find_elem(&mut self, key: &K) -> usize {
         let hash = (self.hasher)(key);
         let mut index = (hash as usize) % self.capacity;
 
-        while let Some(elem) = &self.buffer[index] {
-            if elem.key == *key && !elem.removed {
-                return index;
+        loop {
+            match &mut self.buffer[index] {
+                None => return index,
+                Some(elem) if elem.key == *key => {
+                    return index;
+                }
+                _ => index = (index + 1) % self.capacity,
             }
-            index = (index + 1) % self.capacity;
         }
-        index
     }
 
     fn resize(&mut self) {
@@ -59,8 +61,8 @@ where
             .flatten()
             .filter(|elem| !elem.removed)
         {
-            let slot = self.find_slot(&elem.key);
-            self.buffer[slot] = Some(elem);
+            let index = self.find_elem(&elem.key);
+            self.buffer[index] = Some(elem);
             self.len += 1;
         }
     }
@@ -75,33 +77,37 @@ where
             value,
             removed: false,
         };
-        let slot = self.find_slot(&elem.key);
 
-        if self.buffer[slot].is_none() {
+        let index = self.find_elem(&elem.key);
+
+        if match &self.buffer[index] {
+            None => true,
+            Some(elem) => elem.removed,
+        } {
             self.len += 1;
         }
 
-        self.buffer[slot] = Some(elem);
+        self.buffer[index] = Some(elem);
     }
 
     pub fn get(&mut self, key: K) -> Option<V> {
-        let slot = self.find_slot(&key);
+        let index = self.find_elem(&key);
 
-        match &self.buffer[slot] {
+        match &self.buffer[index] {
             Some(elem) if !elem.removed => Some(elem.value.clone()),
             _ => None,
         }
     }
 
     pub fn remove(&mut self, key: K) {
-        let slot = self.find_slot(&key);
+        let index = self.find_elem(&key);
 
-        if let Some(elem) = &mut self.buffer[slot] {
-            if elem.removed {
-                return;
+        match &mut self.buffer[index] {
+            Some(elem) if !elem.removed => {
+                elem.removed = true;
+                self.len -= 1;
             }
-            elem.removed = true;
-            self.len -= 1;
+            _ => {}
         }
     }
 }
@@ -141,12 +147,47 @@ mod test {
     }
 
     #[test]
+    fn test_insert_overwrite() {
+        let mut map = HashMap::new(hasher);
+
+        map.insert("Hello,", "World");
+        map.insert("Hello,", "Me");
+
+        assert_eq!("Me", map.get("Hello,").unwrap());
+        assert_eq!(1, map.len);
+        assert!(
+            map.buffer
+                .iter()
+                .filter_map(|elem| elem.as_ref())
+                .all(|elem| elem.value == "Me")
+        );
+    }
+
+    #[test]
+    fn test_insert_overwrite_removed() {
+        let mut map = HashMap::new(hasher);
+
+        map.insert("Hello,", "World");
+        map.remove("Hello,");
+        map.insert("Hello,", "Me");
+
+        assert_eq!("Me", map.get("Hello,").unwrap());
+        assert_eq!(1, map.len);
+        assert!(
+            map.buffer
+                .iter()
+                .filter_map(|elem| elem.as_ref())
+                .all(|elem| elem.value == "Me")
+        );
+    }
+
+    #[test]
     fn test_get() {
         let mut map = HashMap::new(hasher);
 
         map.insert("Hello,", "World");
-        assert_eq!("World", map.get("Hello,").unwrap());
 
+        assert_eq!("World", map.get("Hello,").unwrap());
         assert_eq!(None, map.get("Hi,"));
     }
 
@@ -157,7 +198,13 @@ mod test {
         map.insert("Hello,", "World");
         map.remove("Hello,");
 
-        assert_eq!(None, map.get("Hello,"))
+        assert_eq!(None, map.get("Hello,"));
+        assert!(
+            !map.buffer
+                .iter()
+                .filter_map(|elem| elem.as_ref())
+                .any(|elem| elem.key == "Hello," && !elem.removed)
+        );
     }
 
     #[test]
