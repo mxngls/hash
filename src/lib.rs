@@ -3,7 +3,6 @@ use std::mem;
 struct Elem<K, V> {
     key: K,
     value: V,
-    removed: bool,
     psl: u8,
 }
 
@@ -68,11 +67,7 @@ where
         self.buffer = (0..self.capacity).map(|_| None).collect();
         self.len = 0;
 
-        for elem in org_buffer
-            .into_iter()
-            .flatten()
-            .filter(|elem| !elem.removed)
-        {
+        for elem in org_buffer.into_iter().flatten() {
             let index = self.find_elem(&elem.key);
             self.buffer[index] = Some(elem);
             self.len += 1;
@@ -85,23 +80,11 @@ where
         }
 
         let hash = (self.hasher)(&key);
-        let mut new = Elem {
-            key,
-            value,
-            removed: false,
-            psl: 0,
-        };
+        let mut new = Elem { key, value, psl: 0 };
 
         let mut index = (hash as usize) % self.capacity;
 
         while let Some(existing) = &mut self.buffer[index] {
-            // replace removed
-            if existing.removed {
-                *existing = new;
-                self.len += 1;
-                return;
-            }
-
             // overwrite existing
             if existing.key == new.key {
                 existing.value = new.value;
@@ -126,18 +109,31 @@ where
         let index = self.find_elem(&key);
 
         match &self.buffer[index] {
-            Some(elem) if !elem.removed && elem.key == key => Some(elem.value.clone()),
+            Some(elem) if elem.key == key => Some(elem.value.clone()),
             _ => None,
         }
     }
 
     pub fn remove(&mut self, key: K) {
-        let index = self.find_elem(&key);
+        let mut index = self.find_elem(&key);
 
         match &mut self.buffer[index] {
-            Some(elem) if !elem.removed || elem.key == key => {
-                elem.removed = true;
-                self.len -= 1;
+            Some(elem) if elem.key == key => {
+                // remove element
+                self.buffer[index] = None;
+
+                index = (index + 1) % self.capacity;
+
+                // backward shift elements belonging to current bucket
+                while let Some(elem) = &mut self.buffer[index] {
+                    if elem.psl == 0 {
+                        break;
+                    }
+
+                    elem.psl -= 1;
+                    self.buffer[index] = self.buffer[index - 1].take();
+                    index = (index + 1) % self.capacity;
+                }
             }
             _ => {}
         }
@@ -235,7 +231,7 @@ mod test {
             !map.buffer
                 .iter()
                 .filter_map(|elem| elem.as_ref())
-                .any(|elem| elem.key == "Hello," && !elem.removed)
+                .any(|elem| elem.key == "Hello,")
         );
     }
 
